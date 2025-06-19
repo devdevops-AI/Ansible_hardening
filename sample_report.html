@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+    <meta charset='UTF-8'>
+    <title>Compliance Report</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2em; }
+        table { border-collapse: collapse; width: 50%; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        th { background-color: #f0f0f0; }
+        .tabs button { padding: 8px 16px; border: 1px solid #ccc; border-bottom: none; background: #eee; cursor: pointer; }
+        .tabs button.active { background: #fff; }
+        .tabcontent { display: none; border: 1px solid #ccc; padding: 1em; }
+    </style>
+    <script>
+        function openTab(evt, tabId) {
+            var i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName('tabcontent');
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = 'none';
+            }
+            tablinks = document.getElementsByClassName('tablink');
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(' active', '');
+            }
+            document.getElementById(tabId).style.display = 'block';
+            evt.currentTarget.className += ' active';
+        }
+        window.onload = function() {
+            var first = document.querySelector('.tablink');
+            if (first) first.click();
+        };
+    </script>
+</head>
+<body>
+    <h1>Compliance Report</h1>
+    <div class='tabs'>
+        <button class='tablink' onclick="openTab(event, 'Summary')">Summary</button>
+        <button class='tablink' onclick="openTab(event, 'A')">A</button>
+        <button class='tablink' onclick="openTab(event, 'B')">B</button>
+
+    </div>
+
+    <div id='Summary' class='tabcontent'>
+        <table>
+            <tr><th>Status</th><th>Count</th></tr>
+            <tr><td>Compliant</td><td>18</td></tr>
+            <tr><td>Non-compliant</td><td>7</td></tr>
+            <tr><th>Total</th><th>25</th></tr>
+        </table>
+    </div>
+    <div id='A' class='tabcontent'>
+        <h2>A</h2>
+        <table>
+            <tr><th>Status</th><th>Count</th></tr>
+            <tr><td>Compliant</td><td>10</td></tr>
+            <tr><td>Non-compliant</td><td>5</td></tr>
+            <tr><th>Total</th><th>15</th></tr>
+        </table>
+        <h3>Compliant Settings</h3>
+        <ul>
+            <li>ctrl1</li>
+            <li>ctrl2</li>
+        </ul>
+        <h3>Non-compliant Settings</h3>
+        <ul>
+            <li>ctrl3</li>
+            <li>ctrl4</li>
+        </ul>
+    </div>
+    <div id='B' class='tabcontent'>
+        <h2>B</h2>
+        <table>
+            <tr><th>Status</th><th>Count</th></tr>
+            <tr><td>Compliant</td><td>8</td></tr>
+            <tr><td>Non-compliant</td><td>2</td></tr>
+            <tr><th>Total</th><th>10</th></tr>
+        </table>
+        <h3>Compliant Settings</h3>
+        <ul>
+            <li>ctrl5</li>
+        </ul>
+        <h3>Non-compliant Settings</h3>
+        <ul>
+            <li>ctrl6</li>
+        </ul>
+    </div>
+</body>
+</html>
