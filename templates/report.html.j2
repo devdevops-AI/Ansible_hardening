@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Compliance Report</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2em; }
+        table { border-collapse: collapse; width: 50%; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        th { background-color: #f0f0f0; }
+        .tabs button { padding: 8px 16px; border: 1px solid #ccc; border-bottom: none; background: #eee; cursor: pointer; }
+        .tabs button.active { background: #fff; }
+        .tabcontent { display: none; border: 1px solid #ccc; padding: 1em; }
+    </style>
+    <script>
+        function openTab(evt, tabId) {
+            var i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName('tabcontent');
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = 'none';
+            }
+            tablinks = document.getElementsByClassName('tablink');
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(' active', '');
+            }
+            document.getElementById(tabId).style.display = 'block';
+            evt.currentTarget.className += ' active';
+        }
+        window.onload = function() {
+            var first = document.querySelector('.tablink');
+            if (first) first.click();
+        };
+    </script>
+</head>
+<body>
+    <h1>Compliance Report</h1>
+    <div class="tabs">
+        <button class="tablink" onclick="openTab(event, 'Summary')">Summary</button>
+        {% for loc in location_reports %}
+        <button class="tablink" onclick="openTab(event, '{{ loc.name }}')">{{ loc.name }}</button>
+        {% endfor %}
+    </div>
+
+    {# Calculate totals and percentages #}
+    {% set total_compliant = 0 %}
+    {% set total_non_compliant = 0 %}
+    {% for loc in location_reports %}
+        {% set total_compliant = total_compliant + loc.compliant %}
+        {% set total_non_compliant = total_non_compliant + loc.non_compliant %}
+    {% endfor %}
+    {% set total_all = total_compliant + total_non_compliant %}
+    {% if total_all > 0 %}
+        {% set total_percent = (total_compliant / total_all * 100) | round(1) %}
+    {% else %}
+        {% set total_percent = 0 %}
+    {% endif %}
+
+    <div id="Summary" class="tabcontent">
+        <table>
+            <tr>
+                <th>Status</th>
+                <th>Count</th>
+                <th>Percent</th>
+            </tr>
+            <tr>
+                <td>Compliant</td>
+                <td>{{ total_compliant }}</td>
+                <td>{{ total_percent }}%</td>
+            </tr>
+            <tr>
+                <td>Non-compliant</td>
+                <td>{{ total_non_compliant }}</td>
+                <td>{{ (100 - total_percent)|round(1) }}%</td>
+            </tr>
+            <tr>
+                <th>Total</th>
+                <th>{{ total_all }}</th>
+                <th>{{ total_percent }}% compliant</th>
+            </tr>
+        </table>
+    </div>
+
+    {% for loc in location_reports %}
+    <div id="{{ loc.name }}" class="tabcontent">
+        <h2>{{ loc.name }}</h2>
+        {% set loc_total = loc.compliant + loc.non_compliant %}
+        {% if loc_total > 0 %}
+            {% set loc_percent = (loc.compliant / loc_total * 100) | round(1) %}
+        {% else %}
+            {% set loc_percent = 0 %}
+        {% endif %}
+        <table>
+            <tr>
+                <th>Status</th>
+                <th>Count</th>
+                <th>Percent</th>
+            </tr>
+            <tr>
+                <td>Compliant</td>
+                <td>{{ loc.compliant }}</td>
+                <td>{{ loc_percent }}%</td>
+            </tr>
+            <tr>
+                <td>Non-compliant</td>
+                <td>{{ loc.non_compliant }}</td>
+                <td>{{ (100 - loc_percent)|round(1) }}%</td>
+            </tr>
+            <tr>
+                <th>Total</th>
+                <th>{{ loc_total }}</th>
+                <th>{{ loc_percent }}% compliant</th>
+            </tr>
+        </table>
+
+        <h3>Compliant Settings</h3>
+        <ul>
+        {% for item in loc.compliant_items %}
+            <li>{{ item }}</li>
+        {% endfor %}
+        </ul>
+
+        <h3>Non-compliant Settings</h3>
+        <ul>
+        {% for item in loc.non_compliant_items %}
+            <li>{{ item }}</li>
+        {% endfor %}
+        </ul>
+    </div>
+    {% endfor %}
+</body>
+</html>
+

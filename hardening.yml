@@ -1,0 +1,953 @@
+---
+- hosts: all
+  become: yes
+  vars:
+    location_reports: []
+  tasks:
+    - name: Disable unneeded filesystem kernel modules
+      ansible.builtin.lineinfile:
+        path: "/etc/modprobe.d/{{ item }}.conf"
+        line: "install {{ item }} /bin/true"
+        create: yes
+      loop:
+        - cramfs
+        - freevxfs
+        - hfs
+        - hfsplus
+        - jffs2
+        - squashfs
+        - udf
+        - usb-storage
+
+    - name: Configure /tmp partition
+      block:
+        - name: Ensure /tmp is mounted with nodev, nosuid, noexec
+          ansible.posix.mount:
+            path: /tmp
+            src: tmpfs
+            fstype: tmpfs
+            opts: defaults,nodev,nosuid,noexec
+            state: mounted
+
+    - name: Ensure /dev/shm is mounted with nodev, nosuid, noexec
+      ansible.posix.mount:
+        path: /dev/shm
+        src: tmpfs
+        fstype: tmpfs
+        opts: defaults,nodev,nosuid,noexec
+        state: mounted
+
+    - name: Ensure /home is mounted with nodev and nosuid
+      ansible.posix.mount:
+        path: /home
+        opts: defaults,nodev,nosuid
+        state: mounted
+
+    - name: Ensure /var is mounted with nodev and nosuid
+      ansible.posix.mount:
+        path: /var
+        opts: defaults,nodev,nosuid
+        state: mounted
+
+    - name: Ensure /var/tmp is mounted with nodev, nosuid, noexec
+      ansible.posix.mount:
+        path: /var/tmp
+        opts: defaults,nodev,nosuid,noexec
+        state: mounted
+
+    - name: Ensure /var/log is mounted with nodev, nosuid, noexec
+      ansible.posix.mount:
+        path: /var/log
+        opts: defaults,nodev,nosuid,noexec
+        state: mounted
+
+    - name: Ensure /var/log/audit is mounted with nodev, nosuid, noexec
+      ansible.posix.mount:
+        path: /var/log/audit
+        opts: defaults,nodev,nosuid,noexec
+        state: mounted
+
+    - name: Ensure gpgcheck is globally activated
+      ansible.builtin.lineinfile:
+        path: /etc/yum.conf
+        regexp: '^gpgcheck='
+        line: 'gpgcheck=1'
+        create: yes
+
+
+    - name: Ensure bootloader password is set
+      ansible.builtin.lineinfile:
+        path: /boot/grub2/user.cfg
+        line: "GRUB2_PASSWORD={{ grub_password_hash | default('changeme') }}"
+        create: yes
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Ensure permissions on bootloader config are configured
+      ansible.builtin.file:
+        path: /boot/grub2/grub.cfg
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Ensure ASLR is enabled
+      ansible.builtin.sysctl:
+        name: kernel.randomize_va_space
+        value: '2'
+        state: present
+        reload: yes
+
+    - name: Restrict ptrace_scope
+      ansible.builtin.sysctl:
+        name: kernel.yama.ptrace_scope
+        value: '1'
+        state: present
+        reload: yes
+
+    - name: Disable core dump backtraces
+      ansible.builtin.lineinfile:
+        path: /etc/systemd/coredump.conf
+        regexp: '^#?Backtrace='
+        line: 'Backtrace=no'
+        create: yes
+
+    - name: Disable core dump storage
+      ansible.builtin.lineinfile:
+        path: /etc/systemd/coredump.conf
+        regexp: '^#?Storage='
+        line: 'Storage=none'
+        create: yes
+
+    - name: Ensure SELinux is installed
+      ansible.builtin.package:
+        name:
+          - libselinux
+          - selinux-policy
+        state: present
+
+    - name: Ensure SELinux is not disabled in bootloader configuration
+      ansible.builtin.replace:
+        path: /etc/default/grub
+        regexp: 'selinux=0'
+        replace: ''
+
+    - name: Ensure SELinux policy is configured
+      ansible.builtin.lineinfile:
+        path: /etc/selinux/config
+        regexp: '^SELINUXTYPE='
+        line: 'SELINUXTYPE=targeted'
+        create: yes
+    - name: Ensure SELinux mode is not disabled
+      ansible.builtin.command: getenforce
+      register: selinux_status
+      changed_when: false
+      failed_when: "Disabled" in selinux_status.stdout
+
+    - name: Ensure SELinux mode is enforcing
+      ansible.builtin.lineinfile:
+        path: /etc/selinux/config
+        regexp: '^SELINUX='
+        line: 'SELINUX=enforcing'
+        create: yes
+
+    - name: Ensure no unconfined services exist
+      ansible.builtin.command: ps -eZ | grep unconfined_service_t
+      register: unconfined_services
+      changed_when: false
+      failed_when: unconfined_services.stdout != ''
+
+    - name: Ensure mcstrans is not installed
+      ansible.builtin.package:
+        name: mcstrans
+        state: absent
+
+    - name: Ensure setroubleshoot is not installed
+      ansible.builtin.package:
+        name: setroubleshoot
+        state: absent
+
+# 1.6 Configure system wide crypto policy
+- name: Ensure system wide crypto policy is not set to legacy
+  ansible.builtin.replace:
+    path: /etc/crypto-policies/config
+    regexp: '^LEGACY$'
+    replace: 'DEFAULT'
+
+- name: Ensure system wide crypto policy disables sha1 hash and signature support
+  ansible.builtin.command: update-crypto-policies --set DEFAULT:NO-SHA1
+  changed_when: false
+
+- name: Ensure system wide crypto policy disables cbc for ssh
+  ansible.builtin.command: update-crypto-policies --set DEFAULT:NO-SHA1:NO-CBC
+  changed_when: false
+
+- name: Ensure system wide crypto policy disables macs less than 128 bits
+  ansible.builtin.command: update-crypto-policies --set DEFAULT:NO-SHA1:NO-CBC:NO-LOW-MACS
+  changed_when: false
+
+# 1.7 Configure Command Line Warning Banners
+- name: Ensure message of the day is configured properly
+  ansible.builtin.copy:
+    dest: /etc/motd
+    content: 'Authorized uses only. All activity may be monitored.'
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Ensure local login warning banner is configured properly
+  ansible.builtin.copy:
+    dest: /etc/issue
+    content: 'Authorized uses only. All activity may be monitored.'
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Ensure remote login warning banner is configured properly
+  ansible.builtin.copy:
+    dest: /etc/issue.net
+    content: 'Authorized uses only. All activity may be monitored.'
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Ensure access to /etc/motd is configured
+  ansible.builtin.file:
+    path: /etc/motd
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Ensure access to /etc/issue is configured
+  ansible.builtin.file:
+    path: /etc/issue
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Ensure access to /etc/issue.net is configured
+  ansible.builtin.file:
+    path: /etc/issue.net
+    owner: root
+    group: root
+    mode: '0644'
+
+# 1.8 Configure GNOME Display Manager
+- name: Ensure GNOME Display Manager is removed
+  ansible.builtin.package:
+    name: gdm
+    state: absent
+
+- name: Ensure GDM login banner is configured
+  ansible.builtin.lineinfile:
+    path: /etc/dconf/db/gdm.d/01-banner-message
+    create: yes
+    line: 'banner-message-enable=true\nbanner-message-text=Authorized uses only'
+
+- name: Ensure GDM disable-user-list option is enabled
+  ansible.builtin.lineinfile:
+    path: /etc/dconf/db/gdm.d/02-user-list
+    create: yes
+    line: 'disable-user-list=true'
+
+- name: Ensure GDM screen locks when the user is idle
+  ansible.builtin.lineinfile:
+    path: /etc/dconf/db/gdm.d/03-screenlock
+    create: yes
+    line: 'lock-delay=0\nlock-enabled=true'
+
+- name: Ensure GDM screen locks cannot be overridden
+  ansible.builtin.lineinfile:
+    path: /etc/dconf/db/gdm.d/locks/03-screenlock
+    create: yes
+    line: '/org/gnome/desktop/screensaver/lock-enabled'
+
+- name: Ensure GDM automatic mounting of removable media is disabled
+  ansible.builtin.lineinfile:
+    path: /etc/dconf/db/gdm.d/04-media
+    create: yes
+    line: 'automount=false\nautomount-open=false'
+
+- name: Ensure GDM disabling automatic mounting of removable media is not overridden
+  ansible.builtin.lineinfile:
+    path: /etc/dconf/db/gdm.d/locks/04-media
+    create: yes
+    line: '/org/gnome/desktop/media-handling/automount'
+
+- name: Ensure GDM autorun-never is enabled
+  ansible.builtin.lineinfile:
+    path: /etc/dconf/db/gdm.d/05-autorun
+    create: yes
+    line: 'autorun-never=true'
+
+- name: Ensure GDM autorun-never is not overridden
+  ansible.builtin.lineinfile:
+    path: /etc/dconf/db/gdm.d/locks/05-autorun
+    create: yes
+    line: '/org/gnome/desktop/media-handling/autorun-never'
+
+- name: Ensure XDMCP is not enabled
+  ansible.builtin.lineinfile:
+    path: /etc/gdm/custom.conf
+    regexp: '^Enable=true'
+    line: 'Enable=false'
+    create: yes
+# 2.1 Configure Time Synchronization
+- name: Ensure chrony is installed
+  ansible.builtin.package:
+    name: chrony
+    state: present
+
+- name: Ensure chrony service is enabled and running
+  ansible.builtin.service:
+    name: chronyd
+    enabled: yes
+    state: started
+
+- name: Ensure chrony is configured
+  ansible.builtin.lineinfile:
+    path: /etc/chrony.conf
+    regexp: '^server'
+    line: 'server time.nist.gov iburst'
+    create: yes
+
+- name: Ensure chrony is not run as the root user
+  ansible.builtin.lineinfile:
+    path: /etc/sysconfig/chronyd
+    regexp: '^OPTIONS='
+    line: 'OPTIONS="-u chrony"'
+    create: yes
+
+# 2.2 Configure Special Purpose Services
+- name: Remove unnecessary service packages
+  ansible.builtin.package:
+    name:
+      - autofs
+      - avahi
+      - dhcp-server
+      - bind
+      - dnsmasq
+      - samba
+      - vsftpd
+      - dovecot
+      - nfs-utils
+      - ypserv
+      - cups
+      - rpcbind
+      - rsync
+      - net-snmp
+      - telnet-server
+      - tftp-server
+      - squid
+      - httpd
+      - xinetd
+      - xorg-x11-server-Xorg
+    state: absent
+
+- name: Disable unnecessary services
+  ansible.builtin.service:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+  loop:
+    - autofs
+    - avahi-daemon
+    - dhcpd
+    - named
+    - dnsmasq
+    - smb
+    - vsftpd
+    - dovecot
+    - nfs-server
+    - ypserv
+    - cups
+    - rpcbind
+    - rsyncd
+    - snmpd
+    - telnet.socket
+    - tftp
+    - squid
+    - httpd
+    - xinetd
+    - xorg
+
+- name: Ensure mail transfer agent is local only
+  ansible.builtin.lineinfile:
+    path: /etc/postfix/main.cf
+    regexp: '^inet_interfaces'
+    line: 'inet_interfaces = localhost'
+    create: yes
+# 2.3 Configure Service Clients
+- name: Ensure ftp client is not installed
+  ansible.builtin.package:
+    name: ftp
+    state: absent
+
+- name: Ensure ldap client is not installed
+  ansible.builtin.package:
+    name: openldap-clients
+    state: absent
+
+- name: Ensure nis client is not installed
+  ansible.builtin.package:
+    name: ypbind
+    state: absent
+
+- name: Ensure telnet client is not installed
+  ansible.builtin.package:
+    name: telnet
+    state: absent
+
+- name: Ensure tftp client is not installed
+  ansible.builtin.package:
+    name: tftp
+    state: absent
+
+# 3.1 Configure Network Devices
+- name: Disable wireless interfaces
+  ansible.builtin.command: nmcli radio wifi off
+  changed_when: false
+  failed_when: false
+
+- name: Ensure bluetooth services are not in use
+  ansible.builtin.service:
+    name: bluetooth
+    enabled: false
+    state: stopped
+
+# 3.2 Configure Network Kernel Modules
+- name: Disable network kernel modules
+  ansible.builtin.lineinfile:
+    path: "/etc/modprobe.d/{{ item }}.conf"
+    line: "install {{ item }} /bin/true"
+    create: yes
+  loop:
+    - dccp
+    - tipc
+    - rds
+    - sctp
+
+# 3.3 Configure Network Kernel Parameters
+- name: Disable IP forwarding
+  ansible.builtin.sysctl:
+    name: net.ipv4.ip_forward
+    value: '0'
+    state: present
+    reload: yes
+
+- name: Disable IPv6 forwarding
+  ansible.builtin.sysctl:
+    name: net.ipv6.conf.all.forwarding
+    value: '0'
+    state: present
+    reload: yes
+
+- name: Disable packet redirect sending
+  ansible.builtin.sysctl:
+    name: '{{ item }}'
+    value: '0'
+    state: present
+    reload: yes
+  loop:
+    - net.ipv4.conf.all.send_redirects
+    - net.ipv4.conf.default.send_redirects
+
+- name: Ignore bogus ICMP responses
+  ansible.builtin.sysctl:
+    name: net.ipv4.icmp_ignore_bogus_error_responses
+    value: '1'
+    state: present
+    reload: yes
+
+- name: Ignore broadcast ICMP requests
+  ansible.builtin.sysctl:
+    name: net.ipv4.icmp_echo_ignore_broadcasts
+    value: '1'
+    state: present
+    reload: yes
+
+- name: Do not accept ICMP redirects
+  ansible.builtin.sysctl:
+    name: '{{ item }}'
+    value: '0'
+    state: present
+    reload: yes
+  loop:
+    - net.ipv4.conf.all.accept_redirects
+    - net.ipv4.conf.default.accept_redirects
+
+- name: Do not accept secure ICMP redirects
+  ansible.builtin.sysctl:
+    name: '{{ item }}'
+    value: '0'
+    state: present
+    reload: yes
+  loop:
+    - net.ipv4.conf.all.secure_redirects
+    - net.ipv4.conf.default.secure_redirects
+
+- name: Enable reverse path filtering
+  ansible.builtin.sysctl:
+    name: '{{ item }}'
+    value: '1'
+    state: present
+    reload: yes
+  loop:
+    - net.ipv4.conf.all.rp_filter
+    - net.ipv4.conf.default.rp_filter
+
+- name: Do not accept source routed packets
+  ansible.builtin.sysctl:
+    name: '{{ item }}'
+    value: '0'
+    state: present
+    reload: yes
+  loop:
+    - net.ipv4.conf.all.accept_source_route
+    - net.ipv4.conf.default.accept_source_route
+    - net.ipv6.conf.all.accept_source_route
+    - net.ipv6.conf.default.accept_source_route
+
+- name: Log suspicious packets
+  ansible.builtin.sysctl:
+    name: '{{ item }}'
+    value: '1'
+    state: present
+    reload: yes
+  loop:
+    - net.ipv4.conf.all.log_martians
+    - net.ipv4.conf.default.log_martians
+
+- name: Enable TCP SYN cookies
+  ansible.builtin.sysctl:
+    name: net.ipv4.tcp_syncookies
+    value: '1'
+    state: present
+    reload: yes
+
+- name: Do not accept IPv6 router advertisements
+  ansible.builtin.sysctl:
+    name: '{{ item }}'
+    value: '0'
+    state: present
+    reload: yes
+  loop:
+    - net.ipv6.conf.all.accept_ra
+    - net.ipv6.conf.default.accept_ra
+
+# 3.4 Configure Host Based Firewall
+- name: Ensure nftables is installed
+  ansible.builtin.package:
+    name: nftables
+    state: present
+
+- name: Remove other firewall utilities
+  ansible.builtin.package:
+    name: iptables-services
+    state: absent
+
+- name: Ensure nftables base chains exist
+  ansible.builtin.command: |
+    nft list table inet filter || nft create table inet filter
+  changed_when: false
+
+- name: Configure nftables loopback traffic
+  ansible.builtin.command: |
+    nft add chain inet filter input { type filter hook input priority 0 \; }
+  changed_when: false
+  failed_when: false
+
+- name: Set nftables default deny policy
+  ansible.builtin.command: |
+    nft add rule inet filter input counter drop
+  changed_when: false
+  failed_when: false
+
+# 4.1 Configure job schedulers
+- name: Ensure cron daemon is enabled and running
+  ansible.builtin.service:
+    name: cron
+    enabled: yes
+    state: started
+
+- name: Ensure permissions on /etc/crontab are configured
+  ansible.builtin.file:
+    path: /etc/crontab
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Ensure permissions on /etc/cron.hourly are configured
+  ansible.builtin.file:
+    path: /etc/cron.hourly
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Ensure permissions on /etc/cron.daily are configured
+  ansible.builtin.file:
+    path: /etc/cron.daily
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Ensure permissions on /etc/cron.weekly are configured
+  ansible.builtin.file:
+    path: /etc/cron.weekly
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Ensure permissions on /etc/cron.monthly are configured
+  ansible.builtin.file:
+    path: /etc/cron.monthly
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Ensure permissions on /etc/cron.d are configured
+  ansible.builtin.file:
+    path: /etc/cron.d
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Ensure crontab is restricted to authorized users
+  ansible.builtin.file:
+    path: /etc/cron.allow
+    state: touch
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Remove /etc/cron.deny
+  ansible.builtin.file:
+    path: /etc/cron.deny
+    state: absent
+- name: Ensure at is restricted to authorized users
+  ansible.builtin.file:
+    path: /etc/at.allow
+    state: touch
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Remove /etc/at.deny
+  ansible.builtin.file:
+    path: /etc/at.deny
+    state: absent
+
+# 4.2 Configure SSH Server
+- name: Ensure sshd_config permissions are correct
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Ensure permissions on SSH private host key files are configured
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: root
+    group: root
+    mode: '0600'
+  with_fileglob:
+    - /etc/ssh/*_key
+
+- name: Ensure permissions on SSH public host key files are configured
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  with_fileglob:
+    - /etc/ssh/*_key.pub
+
+- name: Configure sshd access
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^AllowUsers'
+    line: 'AllowUsers root'
+    create: yes
+
+- name: Configure sshd settings
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^{{ item.key }}'
+    line: '{{ item.key }} {{ item.value }}'
+    create: yes
+  loop:
+    - { key: 'Banner', value: '/etc/issue' }
+    - { key: 'Ciphers', value: 'aes256-ctr,aes192-ctr,aes128-ctr' }
+    - { key: 'ClientAliveInterval', value: '300' }
+    - { key: 'ClientAliveCountMax', value: '0' }
+    - { key: 'DisableForwarding', value: 'yes' }
+    - { key: 'HostbasedAuthentication', value: 'no' }
+    - { key: 'IgnoreRhosts', value: 'yes' }
+    - { key: 'KexAlgorithms', value: 'diffie-hellman-group-exchange-sha256' }
+    - { key: 'LoginGraceTime', value: '60' }
+    - { key: 'LogLevel', value: 'INFO' }
+    - { key: 'MACs', value: 'hmac-sha2-512,hmac-sha2-256' }
+    - { key: 'MaxAuthTries', value: '4' }
+    - { key: 'MaxSessions', value: '10' }
+    - { key: 'MaxStartups', value: '10:30:100' }
+    - { key: 'PermitEmptyPasswords', value: 'no' }
+    - { key: 'PermitRootLogin', value: 'no' }
+    - { key: 'PermitUserEnvironment', value: 'no' }
+    - { key: 'UsePAM', value: 'yes' }
+
+- name: Ensure sshd crypto_policy is not set
+  ansible.builtin.lineinfile:
+    path: /etc/sysconfig/sshd
+    regexp: '^CRYPTO_POLICY='
+    state: absent
+    create: yes
+
+# 4.3 Configure privilege escalation
+- name: Ensure sudo is installed
+  ansible.builtin.package:
+    name: sudo
+    state: present
+
+- name: Ensure sudo commands use pty
+  ansible.builtin.lineinfile:
+    path: /etc/sudoers
+    regexp: '^Defaults\s+use_pty'
+    line: 'Defaults    use_pty'
+    validate: '/usr/sbin/visudo -cf %s'
+
+- name: Ensure sudo log file exists
+  ansible.builtin.lineinfile:
+    path: /etc/sudoers
+    regexp: '^Defaults\s+logfile='
+    line: 'Defaults    logfile="/var/log/sudo.log"'
+    validate: '/usr/sbin/visudo -cf %s'
+
+- name: Ensure users must provide password for escalation
+  ansible.builtin.replace:
+    path: /etc/sudoers
+    regexp: 'NOPASSWD'
+    replace: ''
+    validate: '/usr/sbin/visudo -cf %s'
+
+- name: Ensure sudo authentication timeout is configured correctly
+  ansible.builtin.lineinfile:
+    path: /etc/sudoers
+    regexp: '^Defaults\s+timestamp_timeout='
+    line: 'Defaults    timestamp_timeout=15'
+    validate: '/usr/sbin/visudo -cf %s'
+
+- name: Ensure access to the su command is restricted
+  ansible.builtin.lineinfile:
+    path: /etc/pam.d/su
+    regexp: '^#?auth\s+required\s+pam_wheel.so'
+    line: 'auth required pam_wheel.so use_uid'
+    create: yes
+
+# 4.4 Configure PAM modules
+- name: Ensure pam and authselect are installed
+  ansible.builtin.package:
+    name:
+      - pam
+      - authselect
+    state: present
+
+- name: Configure pwquality settings
+  ansible.builtin.lineinfile:
+    path: /etc/security/pwquality.conf
+    regexp: '^{{ item.key }}'
+    line: '{{ item.key }} = {{ item.value }}'
+    create: yes
+  loop:
+    - { key: 'minlen', value: '12' }
+    - { key: 'dcredit', value: '-1' }
+    - { key: 'ucredit', value: '-1' }
+    - { key: 'lcredit', value: '-1' }
+    - { key: 'ocredit', value: '-1' }
+
+- name: Configure faillock settings
+  ansible.builtin.lineinfile:
+    path: /etc/security/faillock.conf
+    regexp: '^{{ item.key }}'
+    line: '{{ item.key }} = {{ item.value }}'
+    create: yes
+  loop:
+    - { key: 'deny', value: '5' }
+    - { key: 'unlock_time', value: '900' }
+
+- name: Ensure pam_unix uses sha512 hashing
+  ansible.builtin.lineinfile:
+    path: /etc/pam.d/system-auth
+    regexp: '^password    sufficient    pam_unix.so'
+    line: 'password    sufficient    pam_unix.so sha512'
+    create: yes
+
+# 4.5 User Accounts and Environment
+- name: Configure password aging
+  ansible.builtin.lineinfile:
+    path: /etc/login.defs
+    regexp: '^PASS_MAX_DAYS'
+    line: 'PASS_MAX_DAYS   365'
+    create: yes
+
+- name: Ensure password expiration warning days is configured
+  ansible.builtin.lineinfile:
+    path: /etc/login.defs
+    regexp: '^PASS_WARN_AGE'
+    line: 'PASS_WARN_AGE   7'
+    create: yes
+
+- name: Ensure inactive password lock is 30 days or less
+  ansible.builtin.lineinfile:
+    path: /etc/default/useradd
+    regexp: '^INACTIVE='
+    line: 'INACTIVE=30'
+    create: yes
+
+- name: Ensure root user umask is configured
+  ansible.builtin.lineinfile:
+    path: /root/.bashrc
+    regexp: '^umask'
+    line: 'umask 077'
+    create: yes
+
+# 5.1 Configure Logging
+- name: Ensure rsyslog is installed
+  ansible.builtin.package:
+    name: rsyslog
+    state: present
+
+- name: Ensure rsyslog default file permissions are configured
+  ansible.builtin.lineinfile:
+    path: /etc/rsyslog.conf
+    regexp: '^$FileCreateMode'
+    line: '$FileCreateMode 0640'
+    create: yes
+
+- name: Ensure journald service is enabled
+  ansible.builtin.service:
+    name: systemd-journald
+    enabled: yes
+    state: started
+
+- name: Ensure journald is configured to write logfiles to persistent disk
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/journald.conf
+    regexp: '^Storage='
+    line: 'Storage=persistent'
+    create: yes
+
+# 5.2 Configure System Accounting
+- name: Ensure auditd is installed
+  ansible.builtin.package:
+    name: auditd
+    state: present
+
+- name: Ensure auditd service is enabled
+  ansible.builtin.service:
+    name: auditd
+    enabled: yes
+    state: started
+
+- name: Ensure audit log directory permissions
+  ansible.builtin.file:
+    path: /var/log/audit
+    owner: root
+    group: root
+    mode: '0750'
+
+# 5.3 Configure Integrity Checking
+- name: Ensure AIDE is installed
+  ansible.builtin.package:
+    name: aide
+    state: present
+
+# 6.1 System File Permissions
+- name: Ensure permissions on /etc/passwd are configured
+  ansible.builtin.file:
+    path: /etc/passwd
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Ensure no unowned or ungrouped files or directories exist
+  ansible.builtin.command: find / -xdev \( -nouser -o -nogroup \)
+  register: unowned_files
+  changed_when: false
+
+# 6.2 Local User and Group Settings
+- name: Ensure accounts in /etc/passwd use shadowed passwords
+  ansible.builtin.command: awk -F: '$2 !~ /x/ {print $1}' /etc/passwd
+  register: shadow_check
+  changed_when: false
+  failed_when: shadow_check.stdout != ''
+
+- name: Ensure /etc/shadow password fields are not empty
+  ansible.builtin.command: awk -F: '($2 == "" ) { print $1 }' /etc/shadow
+  register: shadow_empty
+  changed_when: false
+  failed_when: shadow_empty.stdout != ''
+
+- name: Ensure all groups in /etc/passwd exist in /etc/group
+  ansible.builtin.command: awk -F: 'NR==F{a[$1];next}!($4 in a){print $1}' /etc/group /etc/passwd
+  register: missing_groups
+  changed_when: false
+  failed_when: missing_groups.stdout != ''
+
+- name: Ensure no duplicate UIDs exist
+  ansible.builtin.command: awk -F: '{print $3}' /etc/passwd | sort | uniq -d
+  register: dup_uids
+  changed_when: false
+  failed_when: dup_uids.stdout != ''
+
+- name: Ensure no duplicate GIDs exist
+  ansible.builtin.command: awk -F: '{print $3}' /etc/group | sort | uniq -d
+  register: dup_gids
+  changed_when: false
+  failed_when: dup_gids.stdout != ''
+
+- name: Ensure no duplicate user names exist
+  ansible.builtin.command: awk -F: '{print $1}' /etc/passwd | sort | uniq -d
+  register: dup_users
+  changed_when: false
+  failed_when: dup_users.stdout != ''
+
+- name: Ensure no duplicate group names exist
+  ansible.builtin.command: awk -F: '{print $1}' /etc/group | sort | uniq -d
+  register: dup_groups
+  changed_when: false
+  failed_when: dup_groups.stdout != ''
+
+- name: Ensure root path integrity
+  ansible.builtin.shell: |
+    for dir in $(echo $PATH | tr ':' ' '); do
+      [ -d "$dir" ] || continue
+      perms=$(stat -L -c '%A %u %g' "$dir")
+      echo "$perms $dir"
+    done
+  register: root_path
+  changed_when: false
+
+- name: Ensure root is the only UID 0 account
+  ansible.builtin.command: awk -F: '($3 == 0 && $1 != "root") {print $1}' /etc/passwd
+  register: uid0
+  changed_when: false
+  failed_when: uid0.stdout != ''
+
+- name: Ensure local interactive user home directories are configured
+  ansible.builtin.command: awk -F: '($3>=1000 && $7!="/sbin/nologin" && $6!~/^\/home/) {print $1}' /etc/passwd
+  register: bad_home
+  changed_when: false
+  failed_when: bad_home.stdout != ''
+
+- name: Ensure local interactive user dot files access is configured
+  ansible.builtin.command: find /home -maxdepth 2 -name '.*' -perm /022 -type f
+  register: bad_dot
+  changed_when: false
+  failed_when: bad_dot.stdout != ''
+
+- name: Generate compliance report
+  ansible.builtin.template:
+    src: templates/report.html.j2
+    dest: compliance_report.html
+  when: location_reports | length > 0
